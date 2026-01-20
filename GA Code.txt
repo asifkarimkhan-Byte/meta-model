@@ -1,0 +1,77 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from xgboost import XGBRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.linear_model import LinearRegression, Lasso, Ridge
+import matplotlib.pyplot as plt
+from geneticalgorithm import geneticalgorithm as ga
+from scipy.ndimage import uniform_filter1d  # For smoothing the curve
+data = pd.read_excel('test 3.xlsx')
+X = data[['NaOH concentration', 'Soaking Time']]
+y = data['Load']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, random_state=42)
+models = {
+    'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
+    'XGBoost': XGBRegressor(n_estimators=100, random_state=42, verbosity=0),
+    'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
+    'Decision Tree': DecisionTreeRegressor(random_state=42),
+    'Linear Regression': LinearRegression(),
+    'Lasso': Lasso(alpha=0.01, random_state=42),
+    'Ridge': Ridge(alpha=1.0, random_state=42)
+}
+val_predictions = pd.DataFrame()
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    val_predictions[name] = model.predict(X_val)
+meta_learner = LinearRegression()
+meta_learner.fit(val_predictions, y_val)
+
+def fitness_function(x):
+    point = pd.DataFrame([x], columns=['NaOH concentration', 'Soaking Time'])
+    predictions = [model.predict(point)[0] for model in models.values()]
+    prediction_df = pd.DataFrame([predictions], columns=val_predictions.columns)
+    final_pred = meta_learner.predict(prediction_df)[0]
+    noise = np.random.normal(0, 0.01)
+    return -(final_pred + noise)
+varbound = np.array([
+    [1, 10],    # NaOH concentration
+    [1, 8]      # Soaking Time
+])
+algorithm_param = {
+    'max_num_iteration': 300,
+    'population_size': 80,
+    'mutation_probability': 0.15,
+    'elit_ratio': 0.02,
+    'crossover_probability': 0.6,
+    'parents_portion': 0.3,
+    'crossover_type': 'two_point',
+    'max_iteration_without_improv': None
+}
+model = ga(function=fitness_function,
+           dimension=2,
+           variable_type='int',
+           variable_boundaries=varbound,
+           algorithm_parameters=algorithm_param)
+
+model.run()
+best_solution = model.output_dict['variable']
+best_fitness = -model.output_dict['function']
+convergence_curve = -np.array(model.report)
+smoothed_curve = uniform_filter1d(convergence_curve, size=10)
+print("\nBest process parameters (optimized):")
+print(f"NaOH concentration: {best_solution[0]}")
+print(f"Soaking Time: {best_solution[1]}")
+print(f"\nPredicted Load (N): {best_fitness:.2f}")
+plt.figure(figsize=(8, 5))
+plt.plot(smoothed_curve, color='black')
+plt.xlabel('Epoch')              
+plt.ylabel('Load (N)')           
+plt.title('Crosshead Speed 5 mm per min')
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.savefig('optimized_convergence_curve.png', dpi=300)
+plt.show()
