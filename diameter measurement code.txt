@@ -1,0 +1,72 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+
+image_path = "fiber 2.jpg"
+image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+_, binary = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+_, binary_inv = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+contours_inv, _ = cv2.findContours(binary_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+if len(contours_inv) > 0:
+    binary_used = binary_inv
+    contours_used = contours_inv
+elif len(contours) > 0:
+    binary_used = binary
+    contours_used = contours
+else:
+    raise ValueError("No contours found in either thresholded image.")
+contour = max(contours_used, key=cv2.contourArea)
+x, y, w, h = cv2.boundingRect(contour)
+line_x_coords = np.linspace(x, x + w - 1, 30).astype(int)
+output_img = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+line_lengths = []  
+
+for x_coord in line_x_coords:
+    if x_coord >= binary_used.shape[1]:
+        continue
+    column = binary_used[:, x_coord]
+    fiber_pixels = np.where(column == 255)[0]  # fiber is white in binary_used
+
+    if fiber_pixels.size > 0:
+        y_top = fiber_pixels.min()
+        y_bottom = fiber_pixels.max()
+        length = y_bottom - y_top + 1  # +1 to include both ends
+        line_lengths.append(length)
+
+        pt1 = (x_coord, y_top)
+        pt2 = (x_coord, y_bottom)
+        cv2.line(output_img, pt1, pt2, (0, 0, 255), 1)
+plt.figure(figsize=(10, 10))
+plt.imshow(cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB))
+plt.title("30 Vertical Lines Within Fiber Only")
+plt.axis("off")
+plt.savefig('fiber processed.jpg')
+plt.show()
+
+print("Line lengths:")
+print(f"{'Line':<8}{'Pixels':<10}{'Length (µm)':<15}")
+for i, length in enumerate(line_lengths, 1):
+    length_um = length / 0.3187  # Convert to micrometers
+    print(f"{i:<8}{length:<10}{length_um:<15.2f}")
+
+plt.figure(figsize=(12, 4))
+plt.bar(range(1, len(line_lengths) + 1), line_lengths, color='red')
+plt.xlabel("Line Index")
+plt.ylabel("Length (pixels)")
+plt.title("Vertical Line Lengths Along Fiber")
+plt.grid(True)
+plt.show()
+import pandas as pd
+
+lengths_um = [length / 0.3187 for length in line_lengths]
+df = pd.DataFrame({
+    "Line Index": range(1, len(line_lengths) + 1),
+    "Length (pixels)": line_lengths,
+    "Length (µm)": [round(val, 2) for val in lengths_um]
+})
+
+df.to_excel("measured diameter.xlsx", index=False)
+
